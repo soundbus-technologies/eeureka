@@ -34,6 +34,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"encoding/base64"
 )
 
 var instanceId string
@@ -71,14 +72,25 @@ var regTpl = `{
  * Registers this application at the Eureka server at @eurekaUrl as @appName running on port(s) @port and/or @securePort.
  */
 func RegisterAt(eurekaUrl string, appName string, port string, securePort string) {
-	discoveryServerUrl = eurekaUrl
-	Register(appName, port, securePort)
+	var basicAuthStr string
+	var registryUrl string
+	if strings.Index(eurekaUrl, "@") > -1 {
+		basicAuthStr, registryUrl = extractBasicAuthInfo(eurekaUrl)
+	}
+	discoveryServerUrl = registryUrl
+	Register(appName, port, securePort, basicAuthStr)
+}
+
+func extractBasicAuthInfo(eurekaUrl string) (string, string) {
+	url := eurekaUrl[:strings.Index(eurekaUrl, "://")+3] + eurekaUrl[strings.Index(eurekaUrl, "@")+1:]
+	basicAuthStr := eurekaUrl[strings.Index(eurekaUrl, "://")+3: strings.Index(eurekaUrl, "@")]
+	return basicAuthStr, url
 }
 
 /**
   Register the application at the default eurekaUrl.
 */
-func Register(appName string, port string, securePort string) {
+func Register(appName string, port string, securePort string, basicAuthStr string) {
 	instanceId = getUUID()
 
 	tpl := string(regTpl)
@@ -95,6 +107,11 @@ func Register(appName string, port string, securePort string) {
 		ContentType: "application/json;charset=UTF-8",
 		Body:        tpl,
 	}
+
+	if basicAuthStr != "" {
+		registerAction.BasicAuthToken = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicAuthStr))
+	}
+
 	var result bool
 	for {
 		result = doHttpRequest(registerAction)

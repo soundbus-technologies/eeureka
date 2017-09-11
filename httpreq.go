@@ -94,6 +94,10 @@ func buildHttpRequest(httpAction HttpAction) *http.Request {
 		"Accept":       {httpAction.Accept},
 		"Content-Type": {httpAction.ContentType},
 	}
+
+	if httpAction.BasicAuthToken != "" {
+		req.Header["Authorization"] = []string{httpAction.BasicAuthToken}
+	}
 	return req
 }
 
