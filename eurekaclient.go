@@ -39,6 +39,7 @@ import (
 
 var instanceId string
 var discoveryServerUrl = "http://192.168.99.100:8761"
+var basicAuthStr = ""
 
 var regTpl = `{
   "instance": {
@@ -72,26 +73,26 @@ var regTpl = `{
  * Registers this application at the Eureka server at @eurekaUrl as @appName running on port(s) @port and/or @securePort.
  */
 func RegisterAt(eurekaUrl string, appName string, port string, securePort string) {
-	var basicAuthStr string
-	registryUrl := eurekaUrl
-	if strings.Index(eurekaUrl, "@") > -1 {
-		basicAuthStr, registryUrl = extractBasicAuthInfo(eurekaUrl)
-	}
-	discoveryServerUrl = registryUrl
-	Register(appName, port, securePort, basicAuthStr)
+	discoveryServerUrl = eurekaUrl
+	Register(appName, port, securePort)
 }
 
 func extractBasicAuthInfo(eurekaUrl string) (string, string) {
-	url := eurekaUrl[:strings.Index(eurekaUrl, "://")+3] + eurekaUrl[strings.Index(eurekaUrl, "@")+1:]
-	basicAuthStr := eurekaUrl[strings.Index(eurekaUrl, "://")+3: strings.Index(eurekaUrl, "@")]
-	return basicAuthStr, url
+	if strings.Index(eurekaUrl, "@") > -1 {
+		url := eurekaUrl[:strings.Index(eurekaUrl, "://")+3] + eurekaUrl[strings.Index(eurekaUrl, "@")+1:]
+		basicAuthStr := eurekaUrl[strings.Index(eurekaUrl, "://")+3: strings.Index(eurekaUrl, "@")]
+		return basicAuthStr, url
+	} else {
+		return "", eurekaUrl
+	}
 }
 
 /**
   Register the application at the default eurekaUrl.
 */
-func Register(appName string, port string, securePort string, basicAuthStr string) {
-	instanceId = getUUID()
+func Register(appName string, port string, securePort string) {
+	//instanceId = getUUID()
+	instanceId = port
 
 	tpl := string(regTpl)
 	tpl = strings.Replace(tpl, "${ipAddress}", getLocalIP(), -1)
@@ -100,9 +101,12 @@ func Register(appName string, port string, securePort string, basicAuthStr strin
 	tpl = strings.Replace(tpl, "${instanceId}", instanceId, -1)
 	tpl = strings.Replace(tpl, "${appName}", appName, -1)
 
+	serverUrl := discoveryServerUrl
+	basicAuthStr, serverUrl = extractBasicAuthInfo(discoveryServerUrl)
+
 	// Register.
 	registerAction := HttpAction{
-		Url:         discoveryServerUrl + "/eureka/apps/" + appName,
+		Url:         serverUrl + "/eureka/apps/" + appName,
 		Method:      "POST",
 		ContentType: "application/json;charset=UTF-8",
 		Body:        tpl,
