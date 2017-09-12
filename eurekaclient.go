@@ -41,6 +41,11 @@ var instanceId string
 var discoveryServerUrl = "http://192.168.99.100:8761"
 var basicAuthStr = ""
 
+func init() {
+	basicAuthStr, discoveryServerUrl = extractBasicAuthInfo(discoveryServerUrl)
+	fmt.Println("Eureka client parameter init finished.")
+}
+
 var regTpl = `{
   "instance": {
     "hostName":"${ipAddress}",
@@ -73,7 +78,7 @@ var regTpl = `{
  * Registers this application at the Eureka server at @eurekaUrl as @appName running on port(s) @port and/or @securePort.
  */
 func RegisterAt(eurekaUrl string, appName string, port string, securePort string) {
-	discoveryServerUrl = eurekaUrl
+	basicAuthStr, discoveryServerUrl = extractBasicAuthInfo(eurekaUrl)
 	Register(appName, port, securePort)
 }
 
@@ -101,28 +106,22 @@ func Register(appName string, port string, securePort string) {
 	tpl = strings.Replace(tpl, "${instanceId}", instanceId, -1)
 	tpl = strings.Replace(tpl, "${appName}", appName, -1)
 
-	serverUrl := discoveryServerUrl
-	basicAuthStr, serverUrl = extractBasicAuthInfo(discoveryServerUrl)
-
 	// Register.
 	registerAction := HttpAction{
-		Url:         serverUrl + "/eureka/apps/" + appName,
+		Url:         discoveryServerUrl + "/eureka/apps/" + appName,
 		Method:      "POST",
 		ContentType: "application/json;charset=UTF-8",
 		Body:        tpl,
 	}
-
-	if basicAuthStr != "" {
-		registerAction.BasicAuthToken = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicAuthStr))
-	}
+	addBasicAuthTokenIfExisted(&registerAction)
 
 	var result bool
 	for {
 		result = doHttpRequest(registerAction)
 		if result {
 			fmt.Println("Registration OK")
-			handleSigterm(appName)
-			go startHeartbeat(appName)
+			handleSigterm(appName, instanceId)
+			go startHeartbeat(appName, instanceId)
 			break
 		} else {
 			fmt.Println("Registration attempt of " + appName + " failed...")
@@ -145,6 +144,8 @@ func GetServiceInstances(appName string) ([]EurekaInstance, error) {
 		Accept:      "application/json;charset=UTF-8",
 		ContentType: "application/json;charset=UTF-8",
 	}
+
+	addBasicAuthTokenIfExisted(&queryAction)
 	log.Println("Doing queryAction using URL: " + queryAction.Url)
 	bytes, err := executeQuery(queryAction)
 	if err != nil {
@@ -160,6 +161,12 @@ func GetServiceInstances(appName string) ([]EurekaInstance, error) {
 	}
 }
 
+func addBasicAuthTokenIfExisted(action *HttpAction) {
+	if basicAuthStr != "" {
+		action.BasicAuthToken = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicAuthStr))
+	}
+}
+
 // Experimental, untested.
 func GetServices() ([]EurekaApplication, error) {
 	var m EurekaApplicationsRootResponse
@@ -170,6 +177,7 @@ func GetServices() ([]EurekaApplication, error) {
 		Accept:      "application/json;charset=UTF-8",
 		ContentType: "application/json;charset=UTF-8",
 	}
+	addBasicAuthTokenIfExisted(&queryAction)
 	log.Println("Doing queryAction using URL: " + queryAction.Url)
 	bytes, err := executeQuery(queryAction)
 	if err != nil {
@@ -186,31 +194,33 @@ func GetServices() ([]EurekaApplication, error) {
 }
 
 // Start as goroutine, will loop indefinitely until application exits.
-func startHeartbeat(appName string) {
+func startHeartbeat(appName, instanceId string) {
 	for {
 		time.Sleep(time.Second * 30)
-		heartbeat(appName)
+		heartbeat(appName, instanceId)
 	}
 }
 
-func heartbeat(appName string) {
+func heartbeat(appName, instanceId string) {
 	heartbeatAction := HttpAction{
-		Url:         discoveryServerUrl + "/eureka/apps/" + appName + "/" + getLocalIP(),
+		Url:         discoveryServerUrl + "/eureka/apps/" + appName + "/" + fmt.Sprintf("%s:%s:%s", getLocalIP(), appName, instanceId),
 		Method:      "PUT",
 		ContentType: "application/json;charset=UTF-8",
 	}
+	addBasicAuthTokenIfExisted(&heartbeatAction)
 	fmt.Println("Issuing heartbeat to " + heartbeatAction.Url)
 	doHttpRequest(heartbeatAction)
 }
 
-func deregister(appName string) {
+func deregister(appName, instanceId string) {
 	fmt.Println("Trying to deregister application " + appName + "...")
 	// Deregister
 	deregisterAction := HttpAction{
-		Url:         discoveryServerUrl + "/eureka/apps/" + appName + "/" + getLocalIP(),
+		Url:         discoveryServerUrl + "/eureka/apps/" + appName + "/" + fmt.Sprintf("%s:%s:%s", getLocalIP(), appName, instanceId),
 		ContentType: "application/json;charset=UTF-8",
 		Method:      "DELETE",
 	}
+	addBasicAuthTokenIfExisted(&deregisterAction)
 	doHttpRequest(deregisterAction)
 	fmt.Println("Deregistered application " + appName + ", exiting. Check Eureka...")
 }
@@ -235,13 +245,13 @@ func getUUID() string {
 	return uuid.NewV4().String()
 }
 
-func handleSigterm(appName string) {
+func handleSigterm(appName, instanceId string) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	signal.Notify(c, syscall.SIGTERM)
 	go func() {
 		<-c
-		deregister(appName)
+		deregister(appName, instanceId)
 		os.Exit(1)
 	}()
 }
