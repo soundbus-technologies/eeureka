@@ -73,7 +73,7 @@ var regTpl = `{
  */
 func RegisterAt(eurekaUrl string, appName string, port string, securePort string) {
 	var basicAuthStr string
-	var registryUrl string
+	registryUrl := eurekaUrl
 	if strings.Index(eurekaUrl, "@") > -1 {
 		basicAuthStr, registryUrl = extractBasicAuthInfo(eurekaUrl)
 	}
